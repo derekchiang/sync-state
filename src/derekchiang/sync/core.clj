@@ -10,7 +10,15 @@
   `opts` is a map that may contain the following options:
 
   * `:period`: the period (in milliseconds) between successive syncs.  Defaults
-  to 1s."
+  to 1s.
+
+  * `:ex-handler`: an exception handler that will be run with any exception that
+  occurred during the sync loop.  By default, the exception handler prints the
+  exception to stdout.
+
+  * `:ex-continue?`: a boolean value that specifies whether the sync loop should
+  continue, should an exception occur.  Defaults to false.
+  "
   ([sm]
    (start! sm {}))
   ([sm opts]
@@ -31,15 +39,25 @@
       opts)
 
      st/StateManager
-     (let [*shutdown* (promise)
-           period (or (:period opts) 1000)]
-       (future
-         (while (not (realized? *shutdown*))
-           (let [ideal (st/ideal-state sm)
-                 actual (st/actual-state sm)]
-             (st/converge! sm actual ideal)
-             (Thread/sleep period))))
-       *shutdown*))))
+     (let [*shutdown (promise)
+           {:keys [period ex-handler ex-continue?]
+            :or {period 1000
+                 ex-handler #(println %)
+                 ex-continue? false}} opts]
+       (->
+        (fn thread []
+          (try
+            (while (not (realized? *shutdown))
+              (let [ideal (st/ideal-state sm)
+                    actual (st/actual-state sm)]
+                (st/converge! sm actual ideal)
+                (Thread/sleep period)))
+            (catch Exception e
+              (ex-handler e)
+              (when ex-continue?
+                (thread)))))
+        Thread. .start)
+       *shutdown))))
 
 (defn stop!
   "Shutdown"
